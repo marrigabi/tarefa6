@@ -1,148 +1,135 @@
 #include "pico/stdlib.h"
-#include <string.h>       // Para o uso de memset
+#include <string.h>       
 #include <stdio.h>
-#include <string.h>
 #include <ctype.h>
-#include "pico/stdlib.h"
 #include "pico/binary_info.h"
 #include "inc/ssd1306.h"
 #include "hardware/i2c.h"
 
-#define LED_R_PIN 13  // LED vermelho
-#define LED_G_PIN 11  // LED verde
-#define LED_B_PIN 12  // LED amarelo
-#define BTN_A_PIN 5   // Botão para pedestre
+#define RED_LED_PIN 13    // LED vermelho
+#define GREEN_LED_PIN 11  // LED verde
+#define YELLOW_LED_PIN 12 // LED amarelo
+#define PEDESTRIAN_BTN 5  // Botão para pedestre
 
-int A_state = 0;  // Variável para verificar se o botão foi pressionado
+int btn_state = 0;  // Variável para verificar o status do botão
 
-// Função para exibir mensagens no OLED
-void display_message(uint8_t *ssd, struct render_area *frame_area, const char *text[], uint line_count) {
-    memset(ssd, 0, ssd1306_buffer_length);  // Limpa o buffer do display
-    int y = 0;
-    for (uint i = 0; i < line_count; i++) {
-        ssd1306_draw_string(ssd, 5, y, (char *)text[i]);  // Exibe a linha
-        y += 8;
+// Função para atualizar o display OLED
+void update_display(uint8_t *ssd_buf, struct render_area *disp_area, const char *lines[], uint count) {
+    memset(ssd_buf, 0, ssd1306_buffer_length);  // Limpa o buffer
+    int ypos = 0;
+    for (uint idx = 0; idx < count; idx++) {
+        ssd1306_draw_string(ssd_buf, 5, ypos, (char *)lines[idx]);  // Exibe o texto
+        ypos += 8;
     }
-    render_on_display(ssd, frame_area);  // Atualiza o display
+    render_on_display(ssd_buf, disp_area);  // Atualiza no display
 }
 
-// Função para o estado vermelho (sinal fechado)
-void SinalFechado(uint8_t *ssd, struct render_area *frame_area) {
-    gpio_put(LED_R_PIN, 1);
-    gpio_put(LED_G_PIN, 0);
-    gpio_put(LED_B_PIN, 0);
+// Função para o sinal vermelho
+void RedSignal(uint8_t *ssd_buf, struct render_area *disp_area) {
+    gpio_put(RED_LED_PIN, 1);
+    gpio_put(GREEN_LED_PIN, 0);
+    gpio_put(YELLOW_LED_PIN, 0);
 
-    const char *message[] = {
+    const char *msg[] = {
         "SINAL FECHADO",
-        "AGUARDE"
+        "POR FAVOR, AGUARDE"
     };
-    display_message(ssd, frame_area, message, 2);
+    update_display(ssd_buf, disp_area, msg, 2);
 }
 
-// Função para o estado amarelo (sinal de atenção)
-void SinalAtencao(uint8_t *ssd, struct render_area *frame_area) {
-    gpio_put(LED_R_PIN, 1);
-    gpio_put(LED_G_PIN, 1);
-    gpio_put(LED_B_PIN, 0);
+// Função para o sinal amarelo
+void YellowSignal(uint8_t *ssd_buf, struct render_area *disp_area) {
+    gpio_put(RED_LED_PIN, 1);
+    gpio_put(GREEN_LED_PIN, 1);
+    gpio_put(YELLOW_LED_PIN, 0);
 
-    const char *message[] = {
-        "SINAL DE ATENCAO",
+    const char *msg[] = {
+        "SINAL DE ALERTA",
         "PREPARE-SE"
     };
-    display_message(ssd, frame_area, message, 2);
+    update_display(ssd_buf, disp_area, msg, 2);
 }
 
-// Função para o estado verde (sinal aberto)
-void SinalAberto(uint8_t *ssd, struct render_area *frame_area) {
-    gpio_put(LED_R_PIN, 0);
-    gpio_put(LED_G_PIN, 1);
-    gpio_put(LED_B_PIN, 0);
+// Função para o sinal verde
+void GreenSignal(uint8_t *ssd_buf, struct render_area *disp_area) {
+    gpio_put(RED_LED_PIN, 0);
+    gpio_put(GREEN_LED_PIN, 1);
+    gpio_put(YELLOW_LED_PIN, 0);
 
-    const char *message[] = {
+    const char *msg[] = {
         "SINAL ABERTO",
-        "ATRAVESSAR COM",
+        "ATRAVESSE COM",
         "CUIDADO"
     };
-    display_message(ssd, frame_area, message, 3);
+    update_display(ssd_buf, disp_area, msg, 3);
 }
 
-// Função para aguardar o botão ser pressionado
-int WaitWithRead(int timeMS) {
-    for (int i = 0; i < timeMS; i += 100) {
-        A_state = !gpio_get(BTN_A_PIN);
-        if (A_state == 1) {
-            return 1;  // Botão pressionado
+// Função para monitorar o botão
+int ButtonPressWait(int timeout_ms) {
+    for (int elapsed = 0; elapsed < timeout_ms; elapsed += 100) {
+        btn_state = !gpio_get(PEDESTRIAN_BTN);
+        if (btn_state) {
+            return 1;  // Botão detectado
         }
         sleep_ms(100);
     }
-    return 0;  // Tempo esgotado sem pressionamento
+    return 0;  // Tempo esgotado sem pressionar
 }
 
 int main() {
-    stdio_init_all();  // Inicializa os tipos stdio
+    stdio_init_all();  
 
-    // Inicialização do I2C para o OLED
+    // Configuração do I2C para o OLED
     i2c_init(i2c1, ssd1306_i2c_clock * 1000);
     gpio_set_function(14, GPIO_FUNC_I2C);
     gpio_set_function(15, GPIO_FUNC_I2C);
     gpio_pull_up(14);
     gpio_pull_up(15);
 
-    // Inicialização do OLED
+    // Configuração do display OLED
     ssd1306_init();
 
-    // Preparar área de renderização para o display
-    struct render_area frame_area = {
+    struct render_area disp_area = {
         .start_column = 0,
         .end_column = ssd1306_width - 1,
         .start_page = 0,
         .end_page = ssd1306_n_pages - 1
     };
+    calculate_render_area_buffer_length(&disp_area);
 
-    calculate_render_area_buffer_length(&frame_area);
+    uint8_t ssd_buf[ssd1306_buffer_length];
+    memset(ssd_buf, 0, sizeof(ssd_buf));
+    render_on_display(ssd_buf, &disp_area);
 
-    // Zerar o display
-    uint8_t ssd[ssd1306_buffer_length];
-    memset(ssd, 0, ssd1306_buffer_length);
-    render_on_display(ssd, &frame_area);
+    // Configuração dos LEDs
+    gpio_init(RED_LED_PIN);
+    gpio_set_dir(RED_LED_PIN, GPIO_OUT);
+    gpio_init(GREEN_LED_PIN);
+    gpio_set_dir(GREEN_LED_PIN, GPIO_OUT);
+    gpio_init(YELLOW_LED_PIN);
+    gpio_set_dir(YELLOW_LED_PIN, GPIO_OUT);
 
-    // Inicialização dos LEDs
-    gpio_init(LED_R_PIN);
-    gpio_set_dir(LED_R_PIN, GPIO_OUT);
-    gpio_init(LED_G_PIN);
-    gpio_set_dir(LED_G_PIN, GPIO_OUT);
-    gpio_init(LED_B_PIN);
-    gpio_set_dir(LED_B_PIN, GPIO_OUT);
-
-    // Inicialização do botão
-    gpio_init(BTN_A_PIN);
-    gpio_set_dir(BTN_A_PIN, GPIO_IN);
-    gpio_pull_up(BTN_A_PIN);
+    // Configuração do botão
+    gpio_init(PEDESTRIAN_BTN);
+    gpio_set_dir(PEDESTRIAN_BTN, GPIO_IN);
+    gpio_pull_up(PEDESTRIAN_BTN);
 
     while (true) {
-        // Estado inicial: Vermelho
-        SinalFechado(ssd, &frame_area);
-        A_state = WaitWithRead(8000);  // Espera até 8 segundos ou até o botão ser pressionado
+        // Estado inicial: Sinal vermelho
+        RedSignal(ssd_buf, &disp_area);
+        btn_state = ButtonPressWait(8000);
 
-        if (A_state) {  // Botão pressionado
-            // Estado de atenção (amarelo) por 2 segundos
-            SinalAtencao(ssd, &frame_area);
+        if (btn_state) {
+            YellowSignal(ssd_buf, &disp_area);
             sleep_ms(2000);
-
-            // Estado aberto (verde) por 8 segundos
-            SinalAberto(ssd, &frame_area);
+            GreenSignal(ssd_buf, &disp_area);
             sleep_ms(8000);
-        } else {  // Botão não pressionado
-            // Estado de atenção (amarelo) por 2 segundos
-            SinalAtencao(ssd, &frame_area);
+        } else {
+            YellowSignal(ssd_buf, &disp_area);
             sleep_ms(2000);
-
-            // Estado aberto (verde) por 8 segundos
-            SinalAberto(ssd, &frame_area);
+            GreenSignal(ssd_buf, &disp_area);
             sleep_ms(8000);
         }
-
-        // Retorna ao estado inicial (vermelho)
     }
 
     return 0;
